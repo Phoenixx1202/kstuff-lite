@@ -4,14 +4,6 @@
 #include <string.h>
 #include "utils.h"
 
-#if KSTUFF_OBS
-static struct
-{
-    enum kstuff_syscall_tag tag;
-    int trap_reported;
-    int emu_reported;
-} s_current_syscall_state;
-
 static inline void log_spin_pause(void)
 {
     __asm__ volatile("pause");
@@ -27,6 +19,48 @@ static inline void spin_unlock_u64(uint64_t* lock)
 {
     __atomic_store_n(lock, 0, __ATOMIC_RELEASE);
 }
+
+void log_word(uint64_t word)
+{
+    uint64_t seq = __atomic_fetch_add(&shared_area.word_log.next_seq, 1, __ATOMIC_RELAXED);
+    struct kstuff_word_log_entry* entry = &shared_area.word_log.entries[seq % SHARED_LOG_WORD_CAP];
+    __atomic_store_n(&entry->seq, 0, __ATOMIC_RELAXED);
+    entry->word = word;
+    __atomic_store_n(&entry->seq, seq + 1, __ATOMIC_RELEASE);
+}
+
+void log_msg(const char* msg)
+{
+    if(!msg)
+        return;
+    size_t len = strlen(msg);
+    if(!len)
+        return;
+    if(len > SHARED_LOG_MSG_CAP)
+    {
+        msg += len - SHARED_LOG_MSG_CAP;
+        len = SHARED_LOG_MSG_CAP;
+    }
+    spin_lock_u64(&shared_area.msg_log.write_lock);
+    uint64_t seq = shared_area.msg_log.next_seq;
+    size_t off = seq % SHARED_LOG_MSG_CAP;
+    size_t first = SHARED_LOG_MSG_CAP - off;
+    if(first > len)
+        first = len;
+    memcpy(shared_area.msg_log.bytes + off, msg, first);
+    if(len > first)
+        memcpy(shared_area.msg_log.bytes, msg + first, len - first);
+    __atomic_store_n(&shared_area.msg_log.next_seq, seq + len, __ATOMIC_RELEASE);
+    spin_unlock_u64(&shared_area.msg_log.write_lock);
+}
+
+#if KSTUFF_OBS
+static struct
+{
+    enum kstuff_syscall_tag tag;
+    int trap_reported;
+    int emu_reported;
+} s_current_syscall_state;
 
 static struct kstuff_ioctl_com_entry* find_tracked_ioctl_com_entry(uint64_t com)
 {
@@ -100,43 +134,6 @@ static void observe_syscall_metric(enum kstuff_syscall_tag tag, int kind)
         break;
     }
 #undef OBS_CASE
-}
-
-void log_word(uint64_t word)
-{
-    uint64_t seq = __atomic_fetch_add(&shared_area.word_log.next_seq, 1, __ATOMIC_RELAXED);
-    struct kstuff_word_log_entry* entry = &shared_area.word_log.entries[seq % SHARED_LOG_WORD_CAP];
-    __atomic_store_n(&entry->seq, 0, __ATOMIC_RELAXED);
-    entry->word = word;
-    __atomic_store_n(&entry->seq, seq + 1, __ATOMIC_RELEASE);
-    METRIC_INC(log_word_writes);
-}
-
-void log_msg(const char* msg)
-{
-    if(!msg)
-        return;
-    size_t len = strlen(msg);
-    if(!len)
-        return;
-    if(len > SHARED_LOG_MSG_CAP)
-    {
-        msg += len - SHARED_LOG_MSG_CAP;
-        len = SHARED_LOG_MSG_CAP;
-    }
-    spin_lock_u64(&shared_area.msg_log.write_lock);
-    uint64_t seq = shared_area.msg_log.next_seq;
-    size_t off = seq % SHARED_LOG_MSG_CAP;
-    size_t first = SHARED_LOG_MSG_CAP - off;
-    if(first > len)
-        first = len;
-    memcpy(shared_area.msg_log.bytes + off, msg, first);
-    if(len > first)
-        memcpy(shared_area.msg_log.bytes, msg + first, len - first);
-    __atomic_store_n(&shared_area.msg_log.next_seq, seq + len, __ATOMIC_RELEASE);
-    spin_unlock_u64(&shared_area.msg_log.write_lock);
-    METRIC_INC(log_msg_writes);
-    METRIC_ADD(log_msg_bytes, len);
 }
 
 void observe_ioctl_com_emulated(uint64_t com, uint32_t cmd)
