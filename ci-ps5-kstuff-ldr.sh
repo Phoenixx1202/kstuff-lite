@@ -54,7 +54,7 @@ if [ -z "${PS5_PAYLOAD_SDK:-}" ] || [ ! -d "$PS5_PAYLOAD_SDK" ]; then
     exit 1
 fi
 
-kstuff_obs="${KSTUFF_OBS:-0}"
+kstuff_obs="${KSTUFF_OBS:-1}"
 case "$kstuff_obs" in
     0|1)
         ;;
