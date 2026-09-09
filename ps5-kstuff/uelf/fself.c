@@ -14,6 +14,12 @@ static uint64_t s_auth_info_for_exec[17] = {0x4400001084c2052d, 0x20000380000000
 static uint64_t s_auth_info_for_dynlib_ps4[17] = {0x3100000000000002, 0x0000000000000000, 0x000000000000ff00, 0x0000000000000000, 0x0000000000000000, 0x3000300040000000, 0x4000000000000000, 0x0080000000000000, 0xf0000000ffff4000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000};
 static uint64_t s_auth_info_for_exec_ps4[17] = {0x3100000000000001, 0x2000038000000000, 0x000000000000ff00, 0x0000000000000000, 0x0000000000000000, 0x4000400040000000, 0x4000000000000000, 0x0080000000000002, 0xf0000000ffff4000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000};
 
+/* Additional PS5 auth info patterns for common game types */
+/* Pattern for PS5 games with PaidExecA authority (0x3080...) */
+static uint64_t s_auth_info_for_exec_paid_a[17] = {0x4400001084c20000, 0x2000038000000000, 0x000000000000ff00, 0x0000000000000000, 0x0000000000000000, 0x4000400040020000, 0x4000000000000000, 0x0080000000000002, 0xf0000000ffff4000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000};
+/* Pattern for PS5 system modules */
+static uint64_t s_auth_info_for_sysmodule[17] = {0x4800001084c2052d, 0x2000038000000000, 0x000000000000ff00, 0x0000000000000000, 0x0000000000000000, 0x4000400040000000, 0x4000000000000000, 0x0080000000000002, 0xf0000000ffff4000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000};
+
 enum { SELF_BLOCK_SIZE = 16384 };
 
 static void copy_decrypted_self_blocks(char* dmem, const uint64_t* src, const uint64_t* dst, uint32_t count)
@@ -534,8 +540,14 @@ int try_handle_fself_trap(uint64_t* regs)
         {
             uint64_t ret_addr;
             uint64_t* p_authinfo;
+            log_word(0x4653454C46000000ULL | (uint64_t)e_type);
+            log_word(have_authinfo ? 0x415554484F4B0001ULL : 0x415554484F4B0000ULL);
             if(have_authinfo)
+            {
+                log_word(0x41555448494E464FULL);
+                for(int ai = 0; ai < 4; ai++) log_word(authinfo[ai]);
                 p_authinfo = authinfo;
+            }
             else if(is_ps4)
             {
                 if(e_type == 0xfe18)
@@ -545,8 +557,10 @@ int try_handle_fself_trap(uint64_t* regs)
             }
             else
             {
-                if(e_type == 0xfe18)
+                if(e_type == 0xfe18 || e_type == 3)
                     p_authinfo = s_auth_info_for_dynlib;
+                else if(e_type == 2 || e_type == 5 || e_type == 0x104)
+                    p_authinfo = s_auth_info_for_exec_paid_a;
                 else
                     p_authinfo = s_auth_info_for_exec;
             }
