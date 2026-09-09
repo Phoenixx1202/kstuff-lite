@@ -334,8 +334,18 @@ int try_handle_fself_mailbox(uint64_t* regs, uint64_t lr)
          * Use the decompiler plus stack-frame disassembly to identify the
          * context argument; do not extend a version range by proximity.
          */
-        if(FWVER >= 0x800)
-            ctx = regs[R12];
+        if(FWVER >= 0x1000)
+        {
+            if(kpeek64_checked(regs[RBP] - 232, &ctx))
+                RETURN_FSELF_MAILBOX(0);
+        }
+        else if(FWVER >= 0x900 && FWVER <= 0x960)
+            ctx = regs[R14];
+        else if(FWVER >= 0x800 && FWVER <= 0x860)
+        {
+            if(kpeek64_checked(regs[RBP] - 240, &ctx))
+                RETURN_FSELF_MAILBOX(0);
+        }
         else if(FWVER >= 0x500 && FWVER <= 0x761)
         {
             if(kpeek64_checked(regs[RBP] - 192, &ctx))
@@ -362,7 +372,9 @@ int try_handle_fself_mailbox(uint64_t* regs, uint64_t lr)
         METRIC_INC(fself_mailbox_decrypt_multiple_self_blocks);
         uint64_t ctx;
         /* TODO(FW_PORT): verify the ctx register/stack slot at this exact LR. */
-        if(FWVER >= 0x600)
+        if(FWVER >= 0x900 && FWVER <= 0x960)
+            ctx = regs[R14];
+        else if(FWVER >= 0x600 && FWVER <= 0x860)
         {
             if(kpeek64_checked(regs[RBP] - 208, &ctx))
                 RETURN_FSELF_MAILBOX(0);
