@@ -130,7 +130,11 @@ static int parse_header_fself(uint64_t header, uint32_t size, struct fself_heade
         log_word(ex[1]);
         log_word(ex[2]);
         log_word(ex[3]);
-        if((uint32_t)ex[0] == 0x1D3D154F) /* ordinary SELF magic: accept it as a fake SELF */
+        uint8_t hi = (uint8_t)(ex[0] >> 56);
+        uint32_t lo = (uint32_t)ex[0];
+        if(lo == 0x1D3D154F             /* SELF magic present */
+        || hi == 0x49 || hi == 0x48     /* PS5 authority-id style authed fselfs */
+        || hi == 0x44 || hi == 0x31)    /* PS5 debug / PS4-exec authority ids */
         {
             log_word(0x53454C464D414749ULL); // "SELFMAGI"
             info->is_fself = 1;
