@@ -329,12 +329,13 @@ int try_handle_fself_mailbox(uint64_t* regs, uint64_t lr)
     {
         METRIC_INC(fself_mailbox_decrypt_self_block);
         uint64_t ctx;
-        /*
-         * TODO(FW_PORT): recover ctx from the new mailbox caller at this LR.
-         * Use the decompiler plus stack-frame disassembly to identify the
-         * context argument; do not extend a version range by proximity.
-         */
-        if(FWVER >= 0x800)
+        if(FWVER >= 0x900 && FWVER <= 0x960)
+        {
+            ctx = regs[RBX];
+            if(!get_context_fself_info(ctx, 0, 0, 0, 0))
+                ctx = regs[R14];
+        }
+        else if(FWVER >= 0x800 && FWVER <= 0x860)
             ctx = regs[R12];
         else if(FWVER >= 0x500 && FWVER <= 0x761)
         {
