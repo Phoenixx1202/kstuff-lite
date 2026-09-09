@@ -118,6 +118,13 @@ static int parse_header_fself(uint64_t header, uint32_t size, struct fself_heade
     }
     if(ex[1] != 1) //not fself
     {
+        if(ex[1] == 9) // fpkg-gui ProsperoFself uses this key_type
+        {
+            METRIC_INC(fself_header_parse_fself);
+            info->is_fself = 1;
+            info->authinfo_offset = ex_offset + 64 + 48 + n_entries * 80 + 80;
+            return info->is_fself;
+        }
         METRIC_INC(fself_header_parse_not_fself);
         return 0;
     }
