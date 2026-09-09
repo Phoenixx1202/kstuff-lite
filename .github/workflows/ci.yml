@@ -42,5 +42,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: Payload
-        path: ./ps5-kstuff-ldr/kstuff.elf
+        path: |
+          ./ps5-kstuff-ldr/kstuff.elf
+          ./ps5-kstuff/debug-reader.elf
         if-no-files-found: error
