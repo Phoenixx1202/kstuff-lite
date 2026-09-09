@@ -122,8 +122,22 @@ static int parse_header_fself(uint64_t header, uint32_t size, struct fself_heade
         METRIC_INC(fself_header_parse_failures);
         return 0;
     }
-    if(ex[1] != 1) //not fself
+    if(ex[1] != 1) //not the classic scene fself category/key layout
     {
+        log_word(0x465346454C524A54ULL); // "FSELRJT"
+        log_word(ex_offset);
+        log_word(ex[0]);
+        log_word(ex[1]);
+        log_word(ex[2]);
+        log_word(ex[3]);
+        if((uint32_t)ex[0] == 0x1D3D154F) /* ordinary SELF magic: accept it as a fake SELF */
+        {
+            log_word(0x53454C464D414749ULL); // "SELFMAGI"
+            info->is_fself = 1;
+            info->authinfo_offset = ex_offset + 64 + 48 + n_entries * 80 + 80;
+            METRIC_INC(fself_header_parse_fself);
+            return info->is_fself;
+        }
         METRIC_INC(fself_header_parse_not_fself);
         return 0;
     }
