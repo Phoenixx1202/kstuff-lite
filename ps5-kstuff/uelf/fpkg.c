@@ -21,6 +21,12 @@ extern char doreti_iret[];
 
 #define IDX_TO_HANDLE(x) (0x13374100 | ((uint8_t)((x)+1)))
 #define HANDLE_TO_IDX(x) ((((x) & 0xffffff00) == 0x13374100 ? ((int)(uint8_t)(x)) : (int)0) - 1)
+#define DMEM_MAPPING_SIZE (1ull << 39)
+
+static int dmem_range_valid(uint64_t offset, uint64_t size)
+{
+    return offset <= DMEM_MAPPING_SIZE && size <= DMEM_MAPPING_SIZE - offset;
+}
 
 struct crypto_message_result
 {
@@ -336,8 +342,12 @@ int try_handle_fpkg_mailbox(uint64_t* regs, uint64_t lr)
         uint64_t req[8];
         if(copy_from_kernel(req, regs[RDX], 64))
             return 0;
+        if(!dmem_range_valid(req[2], 40) || !dmem_range_valid(req[3], 0x380))
+            return 1;
         uint64_t p_eekpfs = 0;
         memcpy(&p_eekpfs, DMEM+req[2]+32, 8);
+        if(!dmem_range_valid(p_eekpfs, 256))
+            return 1;
         uint8_t eekpfs[256] = {0};
         memcpy(eekpfs, DMEM+p_eekpfs, 256);
         uint8_t crypt_seed[16];

@@ -15,14 +15,40 @@ static uint64_t s_auth_info_for_dynlib_ps4[17] = {0x3100000000000002, 0x00000000
 static uint64_t s_auth_info_for_exec_ps4[17] = {0x3100000000000001, 0x2000038000000000, 0x000000000000ff00, 0x0000000000000000, 0x0000000000000000, 0x4000400040000000, 0x4000000000000000, 0x0080000000000002, 0xf0000000ffff4000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000};
 
 enum { SELF_BLOCK_SIZE = 16384 };
+#define DMEM_MAPPING_SIZE (1ull << 39)
 
-static void copy_decrypted_self_blocks(char* dmem, const uint64_t* src, const uint64_t* dst, uint32_t count)
+static int add_overflows_u64(uint64_t a, uint64_t b, uint64_t* out)
+{
+    *out = a + b;
+    return *out < a;
+}
+
+static int mul_overflows_u64(uint64_t a, uint64_t b, uint64_t* out)
+{
+    if(a && b > (uint64_t)-1 / a)
+        return 1;
+    *out = a * b;
+    return 0;
+}
+
+static int dmem_range_valid(uint64_t offset, uint64_t size)
+{
+    return offset <= DMEM_MAPPING_SIZE && size <= DMEM_MAPPING_SIZE - offset;
+}
+
+static int dmem_array_valid(uint64_t offset, uint64_t count, uint64_t item_size)
+{
+    uint64_t size;
+    return !mul_overflows_u64(count, item_size, &size) && dmem_range_valid(offset, size);
+}
+
+static int copy_decrypted_self_blocks(char* dmem, const uint64_t* src, const uint64_t* dst, uint32_t count)
 {
     for(uint32_t i = 0; i < count;)
     {
         uint64_t run_src = src[i];
         uint64_t run_dst = dst[i];
-        size_t run_size = SELF_BLOCK_SIZE;
+        uint64_t run_size = SELF_BLOCK_SIZE;
 
         if(run_src == run_dst)
         {
@@ -45,9 +71,12 @@ static void copy_decrypted_self_blocks(char* dmem, const uint64_t* src, const ui
             run_size += SELF_BLOCK_SIZE;
         }
 
+        if(!dmem_range_valid(run_src, run_size) || !dmem_range_valid(run_dst, run_size))
+            return 0;
         memcpy(dmem + run_dst, dmem + run_src, run_size);
         i++;
     }
+    return 1;
 }
 
 struct fself_header_info
@@ -80,11 +109,15 @@ static struct
 
 static int copy_from_kernel_buffer(void* dst, uint64_t src, uint64_t src_end, uint64_t offset, size_t sz)
 {
-    if(src + offset < src || src + offset > src_end)
+    uint64_t start;
+    uint64_t end;
+    if(src_end < src)
         return EFAULT;
-    if(src + offset + sz < src + offset || src + offset + sz > src_end)
+    if(add_overflows_u64(src, offset, &start) || start > src_end)
         return EFAULT;
-    return copy_from_kernel(dst, src + offset, sz);
+    if(add_overflows_u64(start, sz, &end) || end > src_end)
+        return EFAULT;
+    return copy_from_kernel(dst, start, sz);
 }
 
 static int parse_header_fself(uint64_t header, uint32_t size, struct fself_header_info* info)
@@ -92,12 +125,24 @@ static int parse_header_fself(uint64_t header, uint32_t size, struct fself_heade
     uint64_t header_end = header + size;
     uint16_t n_entries;
     memset(info, 0, sizeof(*info));
+    if(size < 32 || header_end < header)
+    {
+        METRIC_INC(fself_header_parse_failures);
+        return 0;
+    }
     if(copy_from_kernel_buffer(&n_entries, header, header_end, 24, sizeof(n_entries)))
     {
         METRIC_INC(fself_header_parse_failures);
         return 0;
     }
-    uint64_t elf_offset = 32 + 32 * n_entries;
+    uint64_t entries_size;
+    uint64_t elf_offset;
+    if(mul_overflows_u64(32, n_entries, &entries_size)
+    || add_overflows_u64(32, entries_size, &elf_offset))
+    {
+        METRIC_INC(fself_header_parse_failures);
+        return 0;
+    }
     uint64_t elf[8];
     if(copy_from_kernel_buffer(elf, header, header_end, elf_offset, sizeof(elf)))
     {
@@ -108,10 +153,29 @@ static int parse_header_fself(uint64_t header, uint32_t size, struct fself_heade
     info->is_ps4 = (uint8_t)elf[1] < 2;
     uint64_t e_phoff = elf[4];
     uint16_t e_phnum = elf[7];
-    uint64_t ex_offset = elf_offset + e_phoff + 56 * e_phnum;
-    ex_offset = ((ex_offset - 1) | 15) + 1;
+    uint64_t phdr_size;
+    uint64_t ex_offset;
+    if(mul_overflows_u64(56, e_phnum, &phdr_size)
+    || add_overflows_u64(elf_offset, e_phoff, &ex_offset)
+    || add_overflows_u64(ex_offset, phdr_size, &ex_offset)
+    || add_overflows_u64(ex_offset, 15, &ex_offset))
+    {
+        METRIC_INC(fself_header_parse_failures);
+        return 0;
+    }
+    ex_offset &= ~15ull;
     uint64_t ex[4];
     if(copy_from_kernel_buffer(ex, header, header_end, ex_offset, sizeof(ex)))
+    {
+        METRIC_INC(fself_header_parse_failures);
+        return 0;
+    }
+    uint64_t authinfo_offset;
+    uint64_t authinfo_tail;
+    if(mul_overflows_u64(n_entries, 80, &authinfo_tail)
+    || add_overflows_u64(ex_offset, 64 + 48, &authinfo_offset)
+    || add_overflows_u64(authinfo_offset, authinfo_tail, &authinfo_offset)
+    || add_overflows_u64(authinfo_offset, 80, &authinfo_offset))
     {
         METRIC_INC(fself_header_parse_failures);
         return 0;
@@ -122,14 +186,14 @@ static int parse_header_fself(uint64_t header, uint32_t size, struct fself_heade
         {
             METRIC_INC(fself_header_parse_fself);
             info->is_fself = 1;
-            info->authinfo_offset = ex_offset + 64 + 48 + n_entries * 80 + 80;
+            info->authinfo_offset = authinfo_offset;
             return info->is_fself;
         }
         METRIC_INC(fself_header_parse_not_fself);
         return 0;
     }
     info->is_fself = 1;
-    info->authinfo_offset = ex_offset + 64 + 48 + n_entries * 80 + 80;
+    info->authinfo_offset = authinfo_offset;
     METRIC_INC(fself_header_parse_fself);
     return info->is_fself;
 }
@@ -350,6 +414,10 @@ int try_handle_fself_mailbox(uint64_t* regs, uint64_t lr)
             uint64_t request[8];
             if(copy_from_kernel(request, regs[RDX], sizeof(request)))
                 RETURN_FSELF_MAILBOX(0);
+            if(request[6] > SELF_BLOCK_SIZE
+            || !dmem_range_valid(request[1], request[6])
+            || !dmem_range_valid(request[2], request[6]))
+                RETURN_FSELF_MAILBOX(FSELF_HANDLE_HANDLED);
             memcpy(DMEM+request[1], DMEM+request[2], (uint32_t)request[6]);
             regs[RSP] += sizeof(uint64_t);
             regs[RIP] = lr;
@@ -380,9 +448,14 @@ int try_handle_fself_mailbox(uint64_t* regs, uint64_t lr)
             uint64_t request[8];
             if(copy_from_kernel(request, regs[RDX], sizeof(request)))
                 RETURN_FSELF_MAILBOX(0);
+            if(request[5] > 0x10000
+            || !dmem_array_valid(request[1], request[5], sizeof(uint64_t))
+            || !dmem_array_valid(request[2], request[5], sizeof(uint64_t)))
+                RETURN_FSELF_MAILBOX(FSELF_HANDLE_HANDLED);
             uint64_t* src = (uint64_t*)(DMEM + request[1]);
             uint64_t* dst = (uint64_t*)(DMEM + request[2]);
-            copy_decrypted_self_blocks(DMEM, src, dst, request[5]);
+            if(!copy_decrypted_self_blocks(DMEM, src, dst, request[5]))
+                RETURN_FSELF_MAILBOX(FSELF_HANDLE_HANDLED);
             regs[RSP] += sizeof(uint64_t);
             regs[RIP] = lr;
             regs[RAX] = 0;

@@ -13,6 +13,13 @@
 
 // #define NPDRM_PORTING 1
 
+#define DMEM_MAPPING_SIZE (1ull << 39)
+
+static int dmem_range_valid(uint64_t offset, uint64_t size)
+{
+    return offset <= DMEM_MAPPING_SIZE && size <= DMEM_MAPPING_SIZE - offset;
+}
+
 #ifndef NPDRM_PORTING
 extern char sceSblServiceMailbox_lr_npdrm_cmd_5[];
 extern char sceSblServiceMailbox_lr_npdrm_cmd_6[];
@@ -137,6 +144,15 @@ int try_handle_npdrm_mailbox(uint64_t *regs, uint64_t lr)
         METRIC_INC(npdrm_cmd6);
 
     uint64_t rif_pa = request_hdr.rif_pa;
+    if(!dmem_range_valid(rif_pa, sizeof(struct RifCmd56MemoryLayout)))
+    {
+        METRIC_INC(npdrm_reject_bad_rif_type);
+#ifdef NPDRM_PORTING
+        RETURN_NPDRM(0);
+#else
+        RETURN_NPDRM(1);
+#endif
+    }
     const struct Rif* rif = (const struct Rif*)(DMEM + rif_pa);
 
     if (rif->type != 0x2)
