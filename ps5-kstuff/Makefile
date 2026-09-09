@@ -2,7 +2,7 @@ PROSPER0GDB_OPT ?= -O0
 PAYLOAD_OPT ?= -O0
 UELF_OPT ?= -O3
 UELF_ARCH ?= -march=znver2 -mtune=znver2
-KSTUFF_OBS ?= 0
+KSTUFF_OBS ?= 1
 
 ALL_TARGETS := payload.bin
 BUILD_CONFIG := .build-config
