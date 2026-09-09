@@ -14,12 +14,6 @@ static uint64_t s_auth_info_for_exec[17] = {0x4400001084c2052d, 0x20000380000000
 static uint64_t s_auth_info_for_dynlib_ps4[17] = {0x3100000000000002, 0x0000000000000000, 0x000000000000ff00, 0x0000000000000000, 0x0000000000000000, 0x3000300040000000, 0x4000000000000000, 0x0080000000000000, 0xf0000000ffff4000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000};
 static uint64_t s_auth_info_for_exec_ps4[17] = {0x3100000000000001, 0x2000038000000000, 0x000000000000ff00, 0x0000000000000000, 0x0000000000000000, 0x4000400040000000, 0x4000000000000000, 0x0080000000000002, 0xf0000000ffff4000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000};
 
-/* Additional PS5 auth info patterns for common game types */
-/* Pattern for PS5 games with PaidExecA authority (0x3080...) */
-static uint64_t s_auth_info_for_exec_paid_a[17] = {0x4400001084c20000, 0x2000038000000000, 0x000000000000ff00, 0x0000000000000000, 0x0000000000000000, 0x4000400040020000, 0x4000000000000000, 0x0080000000000002, 0xf0000000ffff4000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000};
-/* Pattern for PS5 system modules */
-static uint64_t s_auth_info_for_sysmodule[17] = {0x4800001084c2052d, 0x2000038000000000, 0x000000000000ff00, 0x0000000000000000, 0x0000000000000000, 0x4000400040000000, 0x4000000000000000, 0x0080000000000002, 0xf0000000ffff4000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000, 0x0000000000000000};
-
 enum { SELF_BLOCK_SIZE = 16384 };
 
 static void copy_decrypted_self_blocks(char* dmem, const uint64_t* src, const uint64_t* dst, uint32_t count)
@@ -122,26 +116,8 @@ static int parse_header_fself(uint64_t header, uint32_t size, struct fself_heade
         METRIC_INC(fself_header_parse_failures);
         return 0;
     }
-    if(ex[1] != 1) //not the classic scene fself category/key layout
+    if(ex[1] != 1) //not fself
     {
-        log_word(0x465346454C524A54ULL); // "FSELRJT"
-        log_word(ex_offset);
-        log_word(ex[0]);
-        log_word(ex[1]);
-        log_word(ex[2]);
-        log_word(ex[3]);
-        uint8_t hi = (uint8_t)(ex[0] >> 56);
-        uint32_t lo = (uint32_t)ex[0];
-        if(lo == 0x1D3D154F             /* SELF magic present */
-        || hi == 0x49 || hi == 0x48     /* PS5 authority-id style authed fselfs */
-        || hi == 0x44 || hi == 0x31)    /* PS5 debug / PS4-exec authority ids */
-        {
-            log_word(0x53454C464D414749ULL); // "SELFMAGI"
-            info->is_fself = 1;
-            info->authinfo_offset = ex_offset + 64 + 48 + n_entries * 80 + 80;
-            METRIC_INC(fself_header_parse_fself);
-            return info->is_fself;
-        }
         METRIC_INC(fself_header_parse_not_fself);
         return 0;
     }
@@ -558,14 +534,8 @@ int try_handle_fself_trap(uint64_t* regs)
         {
             uint64_t ret_addr;
             uint64_t* p_authinfo;
-            log_word(0x4653454C46000000ULL | (uint64_t)e_type);
-            log_word(have_authinfo ? 0x415554484F4B0001ULL : 0x415554484F4B0000ULL);
             if(have_authinfo)
-            {
-                log_word(0x41555448494E464FULL);
-                for(int ai = 0; ai < 4; ai++) log_word(authinfo[ai]);
                 p_authinfo = authinfo;
-            }
             else if(is_ps4)
             {
                 if(e_type == 0xfe18)
@@ -575,10 +545,8 @@ int try_handle_fself_trap(uint64_t* regs)
             }
             else
             {
-                if(e_type == 0xfe18 || e_type == 3)
+                if(e_type == 0xfe18)
                     p_authinfo = s_auth_info_for_dynlib;
-                else if(e_type == 2 || e_type == 5 || e_type == 0x104)
-                    p_authinfo = s_auth_info_for_exec_paid_a;
                 else
                     p_authinfo = s_auth_info_for_exec;
             }

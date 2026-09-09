@@ -141,14 +141,6 @@ int try_handle_npdrm_mailbox(uint64_t *regs, uint64_t lr)
 
     if (rif->type != 0x2)
     {
-        log_word(0x4E5044524D545950ULL);
-        log_word(rif->type);
-        log_word(0x4E5044524D434944ULL);
-        log_word(*(uint64_t*)rif->contentId);
-        log_word(*(uint64_t*)(rif->contentId + 8));
-        log_word(*(uint64_t*)(rif->contentId + 16));
-        log_word(*(uint64_t*)(rif->contentId + 24));
-        log_word(*(uint64_t*)(rif->contentId + 32));
         METRIC_INC(npdrm_reject_bad_rif_type);
 #ifdef NPDRM_PORTING
         RETURN_NPDRM(0);
